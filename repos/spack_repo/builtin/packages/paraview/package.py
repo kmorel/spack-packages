@@ -17,6 +17,32 @@ from spack.package import *
 IS_WINDOWS = sys.platform == "win32"
 
 
+# This is (more or less) the mapping hard-coded in VTK-m logic
+# see https://gitlab.kitware.com/vtk/vtk-m/-/blob/v2.1.0/CMake/VTKmDeviceAdapters.cmake?ref_type=tags#L221-247
+supported_cuda_archs = {
+    "20": "fermi",
+    "21": "fermi",
+    "30": "kepler",
+    "32": "kepler",
+    "35": "kepler",
+    "37": "kepler",
+    "50": "maxwel",
+    "52": "maxwel",
+    "53": "maxwel",
+    "60": "pascal",
+    "61": "pascal",
+    "62": "pascal",
+    "70": "volta",
+    "72": "volta",
+    "75": "turing",
+    "80": "ampere",
+    "86": "ampere",
+}
+
+# This is a list of paraview variants that require the viskores library.
+viskores_dependency_variants = ["+cuda", "+fides", "+rocm"]
+
+
 class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     """ParaView is an open-source, multi-platform data analysis and
     visualization application. This package includes the Catalyst
@@ -76,7 +102,7 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
         default=True,
         description="Install include files for Catalyst or plugins support",
     )
-    variant("python", default=False, description="Enable Python support", when="@5.6:")
+    variant("python", default=False, description="Enable Python support", when="@5.8:")
     variant("fortran", default=False, description="Enable Fortran support")
     variant("mpi", default=True, description="Enable MPI support")
     variant("qt", default=False, description="Enable Qt (gui) support")
@@ -124,6 +150,7 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     variant(
         "use_vtkm",
         default="default",
+        when="@5.3.0:5.13",
         multi=False,
         values=("default", "on", "off"),
         description="Build VTK-m with ParaView by setting PARAVIEW_USE_VTKM=ON,OFF."
@@ -151,8 +178,6 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     conflicts("build_edition=catalyst", when="@:5.7")
     conflicts("build_edition=rendering", when="@:5.7")
     conflicts("build_edition=core", when="@:5.7")
-    # before 5.3.0, ParaView didn't have VTK-m
-    conflicts("use_vtkm=on", when="@:5.3")
     # paraview@5.9.0 is recommended when using the xl compiler
     # See https://gitlab.kitware.com/paraview/paraview/-/merge_requests/4433
     conflicts(
@@ -162,28 +187,6 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     )
 
     # CUDA ARCH
-
-    # This is (more or less) the mapping hard-coded in VTK-m logic
-    # see https://gitlab.kitware.com/vtk/vtk-m/-/blob/v2.1.0/CMake/VTKmDeviceAdapters.cmake?ref_type=tags#L221-247
-    supported_cuda_archs = {
-        "20": "fermi",
-        "21": "fermi",
-        "30": "kepler",
-        "32": "kepler",
-        "35": "kepler",
-        "37": "kepler",
-        "50": "maxwel",
-        "52": "maxwel",
-        "53": "maxwel",
-        "60": "pascal",
-        "61": "pascal",
-        "62": "pascal",
-        "70": "volta",
-        "72": "volta",
-        "75": "turing",
-        "80": "ampere",
-        "86": "ampere",
-    }
 
     # VTK-m and transitively ParaView does not support Tesla Arch
     for _arch in ("10", "11", "12", "13"):
@@ -218,7 +221,6 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     # VTK < 8.2.1 can't handle Python 3.8
     # This affects Paraview <= 5.7 (VTK 8.2.0)
     # https://gitlab.kitware.com/vtk/vtk/-/issues/17670
-    depends_on("python@3:3.7", when="@:5.7 +python", type=("build", "run"))
     depends_on("python@3:", when="@5.8:+python", type=("build", "run"))
 
     depends_on("py-numpy", when="+python", type=("build", "run"))
@@ -267,7 +269,7 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("bzip2")
     depends_on("double-conversion")
     depends_on("expat")
-    depends_on("eigen@3:")
+    depends_on("eigen@3")
     depends_on("freetype")
     depends_on("freetype@:2.10.2", when="@:5.8")
     # depends_on('hdf5+mpi', when='+mpi')
@@ -288,6 +290,10 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("libtheora")
     depends_on("libtiff")
     depends_on("netcdf-c")
+    depends_on("netcdf-c+parallel-netcdf", when="+mpi platform=darwin")
+    depends_on("netcdf-c+parallel-netcdf", when="+mpi platform=freebsd")
+    depends_on("netcdf-c+parallel-netcdf", when="+mpi platform=linux")
+    depends_on("netcdf-c@:4.9.2", when="@:5.13")
     depends_on("pegtl@2.8.3")
     depends_on("protobuf@3.4:")
     # Paraview 5.10 can't build with protobuf > 3.18
@@ -299,23 +305,39 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
     # protobuf requires newer abseil-cpp, which in turn requires C++14,
     # but paraview uses C++11 by default. Use for 5.8+ until ParaView updates
     # its C++ standard level.
-    depends_on("protobuf@3.4:3.21", when="@5.8:%gcc")
-    depends_on("protobuf@3.4:3.21", when="@5.8:%clang")
-    depends_on("protobuf@3.4:3.21", when="@5.11:")
-    depends_on("protobuf@3.4:3.21", when="@master")
+    depends_on("protobuf@3.4:21", when="@5.8:%gcc")
+    depends_on("protobuf@3.4:21", when="@5.8:%clang")
+    depends_on("protobuf@3.4:21", when="@5.11:")
+    depends_on("protobuf@3.4:21", when="@master")
     depends_on("libxml2")
     depends_on("lz4")
     depends_on("xz")
     depends_on("zlib-api")
     depends_on("libcatalyst@2:", when="+libcatalyst")
-    depends_on("hip@5.2:", when="+rocm")
-    # CUDA thrust is already include in the CUDA pkg
-    depends_on("rocthrust", when="@5.13: +rocm ^cmake@3.24:")
-    for target in ROCmPackage.amdgpu_targets:
-        depends_on(
-            "kokkos@:3.7 +rocm amdgpu_target={0}".format(target),
-            when="+rocm amdgpu_target={0}".format(target),
-        )
+
+    # For @6.0:, depend on external Viskores module when needed.
+    with when("@6:"):
+        for variant in viskores_dependency_variants:
+            depends_on("viskores +vtktypes +64bitids", when=f"{variant}")
+        depends_on("viskores +cuda", when="+cuda")
+        for arch in CudaPackage.cuda_arch_values:
+            depends_on(f"viskores +cuda cuda_arch={arch}", when=f"+cuda cuda_arch={arch}")
+        depends_on("viskores +rocm", when="+rocm")
+        for target in ROCmPackage.amdgpu_targets:
+            depends_on(
+                f"viskores +rocm amdgpu_target={target}", when=f"+rocm amdgpu_target={target}"
+            )
+
+    # For @:5.13, VTK-m is built internally, so set up hip internally.
+    with when("@:5"):
+        depends_on("hip@5.2:", when="+rocm")
+        # CUDA thrust is already include in the CUDA pkg
+        depends_on("rocthrust", when="+rocm ^cmake@3.24:")
+        for target in ROCmPackage.amdgpu_targets:
+            depends_on(
+                "kokkos@:3.7 +rocm amdgpu_target={0}".format(target),
+                when="+rocm amdgpu_target={0}".format(target),
+            )
 
     # Older builds of pugi export their symbols differently,
     # and pre-5.9 is unable to handle that.
@@ -396,6 +418,12 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
 
     # https://github.com/Kitware/VTK-m/commit/48e385af319543800398656645327243a29babfb
     patch("vtkm-fix-problems-in-class-member-names.patch", when="@5.13.2 %oneapi@2025:")
+
+    # Vtk's findpegtl's include search is wrong: https://gitlab.kitware.com/vtk/vtk/-/issues/17876
+    patch("pegtl_tao_find.patch", when="platform=windows")
+
+    # https://gitlab.kitware.com/paraview/paraview/-/merge_requests/7593
+    patch("paraview-cdireader-lazy.patch", when="@:6.0 +cdi")
 
     generator("ninja", "make", default="ninja")
     # https://gitlab.kitware.com/paraview/paraview/-/issues/21223
@@ -658,10 +686,21 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
         cmake_args.append("-DPARAVIEW_BUILD_SHARED_LIBS:BOOL=%s" % variant_bool("+shared"))
 
         # VTK-m added to ParaView in 5.3.0 and up
-        if spec.satisfies("@5.3.0:") and spec.variants["use_vtkm"].value != "default":
+        if spec.satisfies("@5.3.0:5") and spec.variants["use_vtkm"].value != "default":
             cmake_args.append(
                 "-DPARAVIEW_USE_VTKM:BOOL=%s" % spec.variants["use_vtkm"].value.upper()
             )
+
+        # Viskores added to ParaView in 6.0.0 and up
+        use_viskores = False
+        if spec.satisfies("@6:"):
+            for variant in viskores_dependency_variants:
+                use_viskores |= spec.satisfies(variant)
+        if use_viskores:
+            cmake_args.append("-DPARAVIEW_USE_VISKORES:BOOL=ON")
+            cmake_args.append("-DVTK_MODULE_USE_EXTERNAL_VTK_vtkviskores:BOOL=ON")
+        else:
+            cmake_args.append("-DPARAVIEW_USE_VISKORES:BOOL=OFF")
 
         if spec.satisfies("@5.8:"):
             cmake_args.append("-DPARAVIEW_USE_CUDA:BOOL=%s" % variant_bool("+cuda"))
@@ -739,14 +778,18 @@ class Paraview(CMakePackage, CudaPackage, ROCmPackage):
         if "+advanced_debug" in spec:
             cmake_args.append("-DVTK_DEBUG_LEAKS:BOOL=ON")
 
-        if spec.satisfies("@5.11:"):
+        if spec.satisfies("@5.11:5"):
             cmake_args.append("-DPARAVIEW_USE_HIP:BOOL=%s" % variant_bool("+rocm"))
-            if "+rocm" in spec:
-                archs = spec.variants["amdgpu_target"].value
-                if archs != "none":
-                    arch_str = ",".join(archs)
-                    cmake_args.append("-DCMAKE_HIP_ARCHITECTURES=%s" % arch_str)
-                cmake_args.append("-DKokkos_CXX_COMPILER=%s" % spec["hip"].hipcc)
+        elif spec.satisfies("@6.0:"):
+            cmake_args.append("-DPARAVIEW_USE_KOKKOS:BOOL=%s" % variant_bool("+rocm"))
+        if "+rocm" in spec:
+            if spec.satisfies("@6:"):
+                cmake_args.append("-DPARAVIEW_KOKKOS_BACKEND:STRING=HIP")
+            archs = spec.variants["amdgpu_target"].value
+            if archs != "none":
+                arch_str = ",".join(archs)
+                cmake_args.append("-DCMAKE_HIP_ARCHITECTURES=%s" % arch_str)
+            cmake_args.append("-DKokkos_CXX_COMPILER=%s" % spec["hip"].hipcc)
 
         if "+catalyst" in spec:
             cmake_args.append("-DVTK_MODULE_ENABLE_ParaView_Catalyst=YES")

@@ -20,6 +20,8 @@ class Mimalloc(CMakePackage):
     version("dev-slice", branch="dev-slice")
     version("dev", branch="dev")
     version("master", branch="master")
+    version("3.2.7", sha256="33621bea902711639b8f83128e64685ffc8224a65443625530747603a2d8726d")
+    version("3.2.6", sha256="bd5756fb2e9f5c275b37ce1d530ac1c98baca0bad6818dcda5c83d6139108a97")
     version("3.1.5", sha256="1c6949032069d5ebea438ec5cedd602d06f40a92ddf0f0d9dcff0993e5f6635c")
     version("3.1.4", sha256="84992bca18d6f74829b884c369de2707085b8248aaf3a1368e21f3993020171f")
     version("3.0.3", sha256="baf343041420e2924e1760bbbc0c111101c44e1cecb998e7951f646a957ee05f")
@@ -77,15 +79,13 @@ class Mimalloc(CMakePackage):
         ),
         "override": (
             True,
-            "Override the standard malloc interface (e.g. define entry points "
-            "for malloc() etc)",
+            "Override the standard malloc interface (e.g. define entry points for malloc() etc)",
             None,
         ),
         "xmalloc": (False, "Enable abort() call on memory allocation failure by default", None),
         "show_errors": (
             False,
-            "Show error and warning messages by default (only enabled by default "
-            "in DEBUG mode)",
+            "Show error and warning messages by default (only enabled by default in DEBUG mode)",
             None,
         ),
         "use_cxx": (
@@ -134,6 +134,6 @@ class Mimalloc(CMakePackage):
 
         # Use LTO also for non-Intel compilers please. This can be removed when they
         # bump cmake_minimum_required to VERSION 3.9.
-        if "+ipo" in self.spec:
+        if "+ipo" in self.spec and self.spec.satisfies("@:2.0.7"):
             args.append("-DCMAKE_POLICY_DEFAULT_CMP0069=NEW")
         return args
