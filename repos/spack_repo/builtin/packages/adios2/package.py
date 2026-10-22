@@ -64,7 +64,12 @@ class Adios2(CMakePackage, CudaPackage, ROCmPackage):
     variant("sz", default=True, description="Enable SZ2 compression")
     variant("sz3", default=True, when="@2.12:", description="Enable SZ3 compression")
     variant("mgard", default=not IS_WINDOWS, when="@2.8:", description="Enable MGARD compression")
-    variant("mgard-mdr", default=False, when="@2.12:", description="Enable MGARD Multi-precision data refactoring")
+    variant(
+        "mgard-mdr",
+        default=False,
+        when="@2.12:",
+        description="Enable MGARD Multi-precision data refactoring",
+    )
 
     # Rransport engines
     variant("sst", default=True, description="Enable the SST staging engine")
